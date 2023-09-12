@@ -1,23 +1,20 @@
-import csv
 import os
+import numpy as np
 
 import pandas as pd
 import torch
 from loguru import logger
-from sklearn.metrics import accuracy_score, classification_report
-from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from transformers import BertModel, BertTokenizer, get_linear_schedule_with_warmup
 
-from utils import text_preprocessing
-
 BERT_MODEL_NAME = "bert-base-uncased"
 BERT_N_CLASSES = 6
 BERT_MAX_LENGTH = 128
 BERT_BATCH_SIZE = 16
-BERT_EPOCHS = 20
+BERT_EPOCHS = 5
 BERT_LEARNING_RATE = 2e-5
 BERT_PATH = "../models/bert_classifier.pth"
 BERT_TRAIN_PATH = "../dataset/train.csv"
@@ -124,13 +121,11 @@ class BERTClassifier(torch.nn.Module):
                 predictions.extend(preds.cpu().tolist())
                 actual_labels.extend(labels.cpu().tolist())
 
-        avg_epoch_loss = total_loss / len(data_loader)
+        avg_loss = total_loss / len(data_loader)
+        avg_accuracy = np.sum(predictions == actual_labels) / len(data_loader)
+        report = classification_report(actual_labels, predictions)
 
-        return (
-            avg_epoch_loss,
-            accuracy_score(actual_labels, predictions),
-            classification_report(actual_labels, predictions),
-        )
+        return avg_loss, avg_accuracy, report
 
     def train(self, data_loader, optimizer, scheduler, device):
         total_loss = 0
@@ -151,9 +146,11 @@ class BERTClassifier(torch.nn.Module):
             _, preds = torch.max(outputs, dim=1)
             predictions.extend(preds.cpu().tolist())
             actual_labels.extend(labels.cpu().tolist())
-        avg_epoch_loss = total_loss / len(data_loader)
+        
+        avg_loss = total_loss / len(data_loader)
+        avg_accuracy = np.sum(predictions == actual_labels) / len(data_loader)
 
-        return actual_labels, predictions, avg_epoch_loss
+        return avg_loss, avg_accuracy
 
     def prediction(self, input, device, max_length=128):
         self.bert.eval()
@@ -191,10 +188,9 @@ def train_bert(device: str, model: BERTClassifier):
     logger.info("> Train/Evaluate...")
     for epoch in range(BERT_EPOCHS):
         logger.info(f"Epoch {epoch + 1}/{BERT_EPOCHS}")
-        train_labels, train_predict, train_loss = model.train(
+        train_loss, train_acc = model.train(
             train_dataloader, optimizer, scheduler, device
         )
-        train_acc = accuracy_score(train_labels, train_predict)
         val_loss, val_acc, report = model.evaluate(val_dataloader, device)
         logger.info(
             "  train_loss: %.5f - val_loss: %.5f - train_acc: %.5f - valid_acc: %.5f"
@@ -208,5 +204,5 @@ def train_bert(device: str, model: BERTClassifier):
 
 
 if __name__ == "__main__":
-    model = BERTClassifier("cpu")
-    train_bert("cpu", model)
+    model = BERTClassifier("cuda")
+    train_bert("cuda", model)
